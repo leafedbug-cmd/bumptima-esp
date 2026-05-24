@@ -169,7 +169,8 @@ body {
   bottom: 6px; left: 0; right: 0;
   display: flex;
   justify-content: center;
-  gap: 22px;
+  align-items: center;
+  gap: 18px;
   font-size: 0.56rem;
   letter-spacing: 1px;
   pointer-events: none;
@@ -177,6 +178,15 @@ body {
 }
 .rf-w { color: var(--g50); }
 .rf-b { color: rgba(79,195,247,0.55); }
+.loc-src {
+  font-size: 0.48rem;
+  letter-spacing: 1px;
+  padding: 1px 5px;
+  border-radius: 2px;
+  border: 1px solid;
+}
+.loc-src.gps { color: var(--g50); border-color: rgba(0,255,100,0.25); }
+.loc-src.ip  { color: rgba(255,200,0,0.6); border-color: rgba(255,200,0,0.25); }
 
 /* ── Device list section — two columns, no tabs ── */
 .list-sec {
@@ -347,6 +357,7 @@ body {
   </div>
   <div class="radar-footer">
     <span class="rf-w" id="rf-w">● 0 WIFI</span>
+    <span class="loc-src" id="loc-src" style="display:none"></span>
     <span class="rf-b" id="rf-b">◆ 0 BT</span>
   </div>
 </section>
@@ -399,43 +410,80 @@ function tryMap() {
       subdomains: 'abcd', maxZoom: 19,
     }).addTo(mapObj);
 
-    // Blue "you are here" dot
-    const dotIcon = L.divIcon({
-      className: '',
-      html: `<div style="
-        width:14px;height:14px;border-radius:50%;
-        background:#4fc3f7;
-        border:2px solid #fff;
-        box-shadow:0 0 10px #4fc3f7,0 0 24px rgba(79,195,247,0.5);
-      "></div>`,
-      iconSize: [14, 14],
-      iconAnchor: [7, 7],
-    });
-
     mapReady = true;
-
-    if ('geolocation' in navigator) {
-      navigator.geolocation.watchPosition(pos => {
-        const ll = [pos.coords.latitude, pos.coords.longitude];
-
-        if (firstFix) {
-          // Hard jump on first lock
-          mapObj.setView(ll, 17);
-          firstFix = false;
-        } else {
-          // Smooth pan for every subsequent update
-          mapObj.panTo(ll, { animate: true, duration: 0.8 });
-        }
-
-        // Move or create the location dot
-        if (locMarker) {
-          locMarker.setLatLng(ll);
-        } else {
-          locMarker = L.marker(ll, { icon: dotIcon, zIndexOffset: 1000 }).addTo(mapObj);
-        }
-      }, null, { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 });
-    }
+    startLocation();
   } catch (_) {}
+}
+
+function makeDotIcon(color) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:14px;height:14px;border-radius:50%;
+      background:${color};border:2px solid #fff;
+      box-shadow:0 0 10px ${color},0 0 24px ${color}88;
+    "></div>`,
+    iconSize: [14, 14], iconAnchor: [7, 7],
+  });
+}
+
+function applyLocation(lat, lng, src) {
+  if (!mapObj) return;
+  const ll = [lat, lng];
+  const badge = document.getElementById('loc-src');
+
+  if (firstFix) {
+    mapObj.setView(ll, 17);
+    firstFix = false;
+  } else {
+    mapObj.panTo(ll, { animate: true, duration: 0.8 });
+  }
+
+  const color = src === 'gps' ? '#4fc3f7' : '#ffc107';
+  if (locMarker) {
+    locMarker.setLatLng(ll);
+  } else {
+    locMarker = L.marker(ll, { icon: makeDotIcon(color), zIndexOffset: 1000 }).addTo(mapObj);
+  }
+
+  // Show source badge
+  badge.textContent = src === 'gps' ? '▲ GPS' : '◎ IP LOC';
+  badge.className   = `loc-src ${src}`;
+  badge.style.display = '';
+}
+
+// Try GPS first; if denied/unavailable fall back to IP geolocation
+function startLocation() {
+  if ('geolocation' in navigator) {
+    navigator.geolocation.watchPosition(
+      pos => applyLocation(pos.coords.latitude, pos.coords.longitude, 'gps'),
+      _err => fetchIPLocation(),   // permission denied or unavailable → IP fallback
+      { enableHighAccuracy: true, maximumAge: 3000, timeout: 8000 }
+    );
+  } else {
+    fetchIPLocation();
+  }
+}
+
+async function fetchIPLocation() {
+  // Try two free IP-geo services in order; no API key needed
+  const services = [
+    async () => { const d = await (await fetch('https://ipapi.co/json/')).json();
+                  return { lat: d.latitude, lng: d.longitude }; },
+    async () => { const d = await (await fetch('https://ip-api.com/json')).json();
+                  return { lat: d.lat, lng: d.lon }; },
+  ];
+  for (const svc of services) {
+    try {
+      const { lat, lng } = await svc();
+      if (lat && lng) {
+        applyLocation(lat, lng, 'ip');
+        // Re-poll every 60 s (IP location is city-level, doesn't need faster)
+        setTimeout(fetchIPLocation, 60000);
+        return;
+      }
+    } catch (_) {}
+  }
 }
 
 // ── Radar canvas ─────────────────────────────────────────────────────────────
