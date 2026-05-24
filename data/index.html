@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#040408">
+<title>Bumptima</title>
+
+<!-- Leaflet (loaded async — radar works without it if no internet yet) -->
+<link id="leaflet-css" rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
+<style>
+/* ── Reset ── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --g:    #00ff64;
+  --g50:  rgba(0,255,100,0.5);
+  --g20:  rgba(0,255,100,0.2);
+  --g10:  rgba(0,255,100,0.1);
+  --g05:  rgba(0,255,100,0.05);
+  --blue: #4fc3f7;
+  --b20:  rgba(79,195,247,0.2);
+  --b10:  rgba(79,195,247,0.1);
+  --bg:   #040408;
+  --line: rgba(0,255,100,0.14);
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--g);
+  font-family: 'Courier New', Courier, monospace;
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+/* ── Header ── */
+.hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 38px;
+  padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  background: rgba(4,4,12,0.97);
+  z-index: 10;
+}
+
+.hdr-title {
+  font-size: 0.82rem;
+  letter-spacing: 6px;
+  font-weight: bold;
+  text-shadow: 0 0 14px var(--g);
+}
+
+.hdr-counts {
+  display: flex;
+  gap: 14px;
+  font-size: 0.58rem;
+  letter-spacing: 1px;
+}
+.count-w { color: var(--g50); }
+.count-b { color: rgba(79,195,247,0.6); }
+
+.pulse {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--g);
+  box-shadow: 0 0 8px var(--g);
+  animation: blink 1.8s ease-in-out infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.15} }
+
+/* ── Radar section (top ~50%) ── */
+.radar-sec {
+  flex: 0 0 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  position: relative;
+  background: radial-gradient(ellipse at center,
+    rgba(0,20,8,0.6) 0%, var(--bg) 70%);
+}
+
+/* CRT scanline texture */
+.radar-sec::before {
+  content: '';
+  position: absolute; inset: 0;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0, transparent 3px,
+    rgba(0,0,0,0.06) 3px, rgba(0,0,0,0.06) 4px
+  );
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* ── Radar assembly ── */
+.radar-wrap {
+  position: relative;
+  z-index: 2;
+}
+
+/* Double decorative rings outside the radar */
+.radar-wrap::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,255,100,0.15);
+}
+.radar-wrap::after {
+  content: '';
+  position: absolute;
+  inset: -16px;
+  border-radius: 50%;
+  border: 1px solid rgba(0,255,100,0.06);
+}
+
+.radar-disc {
+  border-radius: 50%;
+  border: 2px solid var(--g50);
+  box-shadow:
+    0 0 28px rgba(0,255,100,0.22),
+    0 0 64px rgba(0,255,100,0.06),
+    inset 0 0 32px rgba(0,0,0,0.8);
+  overflow: hidden;
+  position: relative;
+}
+
+/* Map layer inside the disc */
+.map-clip {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  overflow: hidden;
+  background: #05100a;
+}
+#lmap { width: 100%; height: 100%; }
+
+/* Vignette over the map so radar rings read clearly */
+.map-clip::after {
+  content: '';
+  position: absolute; inset: 0;
+  background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.55) 100%);
+  pointer-events: none;
+}
+
+/* Canvas for sweep + dots — sits on top of map */
+#rc {
+  position: absolute; inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 3;
+}
+
+/* Compass */
+.compass {
+  position: absolute;
+  inset: -20px;
+  pointer-events: none;
+  font-size: 0.5rem;
+  color: rgba(0,255,100,0.45);
+  letter-spacing: 1px;
+  z-index: 4;
+}
+.compass span { position: absolute; }
+.compass .N { top: 0;    left: 50%; transform: translateX(-50%); }
+.compass .S { bottom: 0; left: 50%; transform: translateX(-50%); }
+.compass .E { right: 0;  top: 50%;  transform: translateY(-50%); }
+.compass .W { left: 0;   top: 50%;  transform: translateY(-50%); }
+
+/* Stats row below the radar disc */
+.radar-footer {
+  position: absolute;
+  bottom: 6px; left: 0; right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 22px;
+  font-size: 0.56rem;
+  letter-spacing: 1px;
+  pointer-events: none;
+  z-index: 6;
+}
+.rf-w { color: var(--g50); }
+.rf-b { color: rgba(79,195,247,0.55); }
+
+/* ── Device list section (bottom ~50%) ── */
+.list-sec {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--line);
+  background: rgba(4,4,12,0.9);
+}
+.tab-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: rgba(0,255,100,0.28);
+  font-family: inherit;
+  font-size: 0.62rem;
+  letter-spacing: 2px;
+  padding: 7px 4px 5px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, text-shadow 0.15s;
+}
+.tab-btn.on {
+  color: var(--g);
+  border-bottom-color: var(--g);
+  text-shadow: 0 0 10px var(--g);
+}
+.tab-btn.bt-tab.on {
+  color: var(--blue);
+  border-bottom-color: var(--blue);
+  text-shadow: 0 0 10px var(--blue);
+}
+
+/* Panels */
+.panel { display: none; flex-direction: column; flex: 1; min-height: 0; }
+.panel.on { display: flex; }
+
+.list-hdr {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 10px;
+  font-size: 0.52rem;
+  color: rgba(0,255,100,0.25);
+  letter-spacing: 1px;
+  border-bottom: 1px solid rgba(0,255,100,0.05);
+  flex-shrink: 0;
+}
+
+.scroll {
+  overflow-y: auto;
+  flex: 1;
+  overscroll-behavior: contain;
+}
+.scroll::-webkit-scrollbar { width: 3px; }
+.scroll::-webkit-scrollbar-thumb { background: var(--g20); border-radius: 2px; }
+
+/* Device row */
+.dev {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border-bottom: 1px solid rgba(0,255,100,0.04);
+  animation: fadeIn 0.25s ease;
+}
+@keyframes fadeIn { from { opacity: 0; transform: translateX(-3px); } to { opacity: 1; } }
+
+.dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.dot-w { background: var(--g);    box-shadow: 0 0 5px var(--g); }
+.dot-b { background: var(--blue); box-shadow: 0 0 5px var(--blue); }
+
+.dev-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  color: #c8ffd4;
+}
+.dev-name.dim  { color: rgba(255,255,255,0.25); font-style: italic; }
+.dev-name.bt-n { color: #b3e5fc; }
+
+/* Signal bars */
+.bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 11px;
+  flex-shrink: 0;
+}
+.bar { width: 3px; border-radius: 1px; }
+.bar.off { background: rgba(0,255,100,0.12); }
+.bar.on  { background: var(--g); }
+.bar.bt.on { background: var(--blue); }
+
+.dbm {
+  font-size: 0.56rem;
+  color: var(--g50);
+  width: 52px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.dbm.bt { color: rgba(79,195,247,0.5); }
+
+.tag {
+  font-size: 0.52rem;
+  color: rgba(0,255,100,0.28);
+  background: var(--g05);
+  border: 1px solid rgba(0,255,100,0.1);
+  padding: 1px 4px;
+  border-radius: 2px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.tag.bt {
+  color: rgba(79,195,247,0.3);
+  background: var(--b10);
+  border-color: rgba(79,195,247,0.15);
+}
+
+.empty {
+  padding: 20px;
+  text-align: center;
+  font-size: 0.62rem;
+  color: rgba(0,255,100,0.18);
+  letter-spacing: 2px;
+}
+
+/* Skeleton loaders */
+.skel {
+  height: 28px; margin: 5px 10px; border-radius: 3px;
+  background: linear-gradient(90deg,
+    rgba(0,255,100,0.03) 25%,
+    rgba(0,255,100,0.07) 50%,
+    rgba(0,255,100,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+}
+@keyframes shimmer { from { background-position: -200% 0; } to { background-position: 200% 0; } }
+</style>
+</head>
+
+<body>
+
+<!-- ── Header ─────────────────────────────────────────── -->
+<header class="hdr">
+  <div class="hdr-title">BUMPTIMA</div>
+  <div class="hdr-counts">
+    <span class="count-w" id="hc-w">WIFI: —</span>
+    <span class="count-b" id="hc-b">BT: —</span>
+  </div>
+  <div class="pulse"></div>
+</header>
+
+<!-- ── Radar ──────────────────────────────────────────── -->
+<section class="radar-sec">
+  <div class="radar-wrap" id="rw">
+    <div class="radar-disc" id="rd">
+      <div class="map-clip"><div id="lmap"></div></div>
+      <canvas id="rc"></canvas>
+    </div>
+    <div class="compass">
+      <span class="N">N</span><span class="S">S</span>
+      <span class="E">E</span><span class="W">W</span>
+    </div>
+  </div>
+  <div class="radar-footer">
+    <span class="rf-w" id="rf-w">● 0 WIFI</span>
+    <span class="rf-b" id="rf-b">◆ 0 BT</span>
+  </div>
+</section>
+
+<!-- ── Device list ─────────────────────────────────────── -->
+<div class="list-sec">
+
+  <div class="tabs">
+    <button class="tab-btn on"    id="tb-w" onclick="tab('w')">◉ WIFI</button>
+    <button class="tab-btn bt-tab" id="tb-b" onclick="tab('b')">◈ BLUETOOTH</button>
+  </div>
+
+  <div class="panel on" id="pn-w">
+    <div class="list-hdr">
+      <span>SSID / BSSID</span><span id="ts-w">—</span>
+    </div>
+    <div class="scroll" id="ls-w">
+      <div class="skel"></div><div class="skel"></div><div class="skel"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="pn-b">
+    <div class="list-hdr">
+      <span>DEVICE / ADDRESS</span><span id="ts-b">—</span>
+    </div>
+    <div class="scroll" id="ls-b">
+      <div class="skel"></div><div class="skel"></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────────────────────
+const S = { wifi: [], bt: [] };
+let mapObj = null, mapReady = false;
+let cSize  = 0, sweepA = 0;
+const SWEEP_SPEED = 0.017;    // rad/frame — about 1 revolution per 6 s at 60fps
+
+// ── Tab switching ──────────────────────────────────────────────────────────────
+function tab(t) {
+  ['w','b'].forEach(id => {
+    document.getElementById('tb-' + id).classList.toggle('on', id === t);
+    document.getElementById('pn-' + id).classList.toggle('on', id === t);
+  });
+}
+
+// ── Leaflet map ────────────────────────────────────────────────────────────────
+function tryMap() {
+  if (typeof L === 'undefined' || mapReady) return;
+  try {
+    mapObj = L.map('lmap', {
+      zoomControl: false, attributionControl: false,
+      dragging: false, keyboard: false,
+      scrollWheelZoom: false, touchZoom: false, doubleClickZoom: false,
+    }).setView([0, 0], 2);
+
+    // Dark CartoDB tiles
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      subdomains: 'abcd', maxZoom: 19,
+    }).addTo(mapObj);
+
+    mapReady = true;
+
+    // Follow the user's GPS position
+    if ('geolocation' in navigator) {
+      navigator.geolocation.watchPosition(pos => {
+        mapObj.setView([pos.coords.latitude, pos.coords.longitude], 16);
+      }, null, { enableHighAccuracy: true, maximumAge: 10000 });
+    }
+  } catch (_) {}
+}
+
+// ── Radar sizing ───────────────────────────────────────────────────────────────
+const canvas = document.getElementById('rc');
+const ctx    = canvas.getContext('2d');
+
+function sizeRadar() {
+  const sec  = document.querySelector('.radar-sec');
+  const side = Math.floor(Math.min(sec.clientWidth, sec.clientHeight) * 0.86);
+  cSize = side;
+  canvas.width  = side;
+  canvas.height = side;
+  document.getElementById('rd').style.width  = side + 'px';
+  document.getElementById('rd').style.height = side + 'px';
+  if (mapObj) setTimeout(() => mapObj.invalidateSize(), 60);
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+// FNV-1a hash → stable angle for a device ID string
+function idToAngle(s) {
+  let h = 0x811c9dc5 | 0;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h  = Math.imul(h, 0x01000193);
+  }
+  return ((h >>> 0) / 0xffffffff) * Math.PI * 2;
+}
+
+// RSSI → radius (stronger = closer to centre)
+function rssiToR(rssi, maxR) {
+  const c = Math.max(-100, Math.min(-20, rssi));
+  const n = (c - (-20)) / (-100 - (-20));   // 0 = strong, 1 = weak
+  return (0.07 + n * 0.83) * maxR;
+}
+
+// ── Draw frame ─────────────────────────────────────────────────────────────────
+function drawFrame() {
+  const SZ = cSize;
+  if (SZ < 4) { requestAnimationFrame(drawFrame); return; }
+
+  const cx = SZ / 2, cy = SZ / 2, R = SZ / 2 - 2;
+  ctx.clearRect(0, 0, SZ, SZ);
+
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
+
+  // ── Range rings ──────────────────────────────────────────────────────────
+  for (let i = 1; i <= 4; i++) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, (i / 4) * R, 0, Math.PI * 2);
+    ctx.strokeStyle = i === 4 ? 'rgba(0,255,100,0.16)' : 'rgba(0,255,100,0.07)';
+    ctx.lineWidth = 1; ctx.stroke();
+  }
+
+  // ── Crosshairs ───────────────────────────────────────────────────────────
+  ctx.strokeStyle = 'rgba(0,255,100,0.07)'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(cx, cy - R); ctx.lineTo(cx, cy + R); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx - R, cy); ctx.lineTo(cx + R, cy); ctx.stroke();
+
+  // ── Diagonal guides ───────────────────────────────────────────────────────
+  ctx.strokeStyle = 'rgba(0,255,100,0.04)'; ctx.lineWidth = 0.5;
+  [1, -1].forEach(sign => {
+    ctx.beginPath();
+    ctx.moveTo(cx - R * 0.72, cy - sign * R * 0.72);
+    ctx.lineTo(cx + R * 0.72, cy + sign * R * 0.72);
+    ctx.stroke();
+  });
+
+  // ── Sweep trail (60° arc, exponential fade) ───────────────────────────────
+  const TRAIL = 52;
+  for (let i = 0; i < TRAIL; i++) {
+    const frac = i / TRAIL;
+    const a0   = sweepA - frac * (Math.PI * 0.55);
+    const a1   = a0 - (Math.PI * 0.55 / TRAIL);
+    ctx.beginPath(); ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, R, a0, a1, true); ctx.closePath();
+    ctx.fillStyle = `rgba(0,255,100,${0.14 * Math.pow(1 - frac, 1.6)})`;
+    ctx.fill();
+  }
+
+  // ── Sweep line ────────────────────────────────────────────────────────────
+  ctx.save();
+  ctx.shadowColor = '#00ff64'; ctx.shadowBlur = 9;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(cx + Math.cos(sweepA) * R, cy + Math.sin(sweepA) * R);
+  ctx.strokeStyle = 'rgba(0,255,100,0.92)'; ctx.lineWidth = 1.5; ctx.stroke();
+  ctx.restore();
+
+  // ── Device dots ───────────────────────────────────────────────────────────
+  [
+    ...S.wifi.map(d => ({ id: d.bssid, rssi: d.rssi, t: 'w' })),
+    ...S.bt.map(d => ({
+      id: d.addr,
+      rssi: (d.rssi != null && d.rssi > -100) ? d.rssi : -80,
+      t: 'b'
+    })),
+  ].forEach(({ id, rssi, t }) => {
+    const r     = rssiToR(rssi, R);
+    const angle = idToAngle(id);
+    const x     = cx + Math.cos(angle) * r;
+    const y     = cy + Math.sin(angle) * r;
+    const color = t === 'w' ? '#00ff64' : '#4fc3f7';
+    const glow  = t === 'w' ? 'rgba(0,255,100,0.14)' : 'rgba(79,195,247,0.14)';
+
+    // Glow halo
+    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2);
+    ctx.fillStyle = glow; ctx.fill();
+
+    // Solid core
+    ctx.beginPath(); ctx.arc(x, y, 2.8, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.shadowColor = color; ctx.shadowBlur = 7;
+    ctx.fill(); ctx.shadowBlur = 0;
+  });
+
+  ctx.restore();
+
+  sweepA += SWEEP_SPEED;
+  if (sweepA > Math.PI * 2) sweepA -= Math.PI * 2;
+  requestAnimationFrame(drawFrame);
+}
+
+// ── Signal bars HTML ───────────────────────────────────────────────────────────
+const BAR_H = ['3px','5px','7px','10px'];
+function sigBars(rssi, bt = false) {
+  const lvl = rssi > -50 ? 4 : rssi > -65 ? 3 : rssi > -75 ? 2 : rssi > -85 ? 1 : 0;
+  const cls = bt ? 'bt' : '';
+  return '<div class="bars">' +
+    BAR_H.map((h, i) =>
+      `<div class="bar ${cls} ${i < lvl ? 'on' : 'off'}" style="height:${h}"></div>`
+    ).join('') +
+    '</div>';
+}
+
+const AUTH_NAMES = ['OPEN','WEP','WPA','WPA2','WPA+2','WPA3','?'];
+const COD_MAJOR  = ['MISC','PC','PHONE','LAN','AV','INPUT','IMG','WEAR','TOY','MED'];
+function codStr(cod) { return COD_MAJOR[(cod >> 8) & 0x1f] || 'DEV'; }
+
+// ── Render lists ───────────────────────────────────────────────────────────────
+function renderWifi(list) {
+  if (!list.length)
+    return '<div class="empty">NO NETWORKS FOUND<br>SCANNING...</div>';
+  return [...list].sort((a, b) => b.rssi - a.rssi).map(d => `
+    <div class="dev">
+      <div class="dot dot-w"></div>
+      <div class="dev-name ${d.ssid ? '' : 'dim'}">${esc(d.ssid || '[hidden]')}</div>
+      ${sigBars(d.rssi)}
+      <div class="dbm">${d.rssi}&thinsp;dBm</div>
+      <div class="tag">CH${d.channel}</div>
+      <div class="tag">${AUTH_NAMES[d.auth] ?? 'ENC'}</div>
+    </div>`).join('');
+}
+
+function renderBt(list) {
+  if (!list.length)
+    return '<div class="empty">SCANNING FOR DEVICES...<br>INQUIRY IN PROGRESS</div>';
+  return [...list].sort((a, b) => b.rssi - a.rssi).map(d => `
+    <div class="dev">
+      <div class="dot dot-b"></div>
+      <div class="dev-name bt-n">${esc(d.name || d.addr)}</div>
+      ${sigBars(d.rssi, true)}
+      <div class="dbm bt">${d.rssi > -100 ? d.rssi + '&thinsp;dBm' : '—'}</div>
+      <div class="tag bt">${codStr(d.cod)}</div>
+    </div>`).join('');
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Fetch & update ─────────────────────────────────────────────────────────────
+async function fetchScan() {
+  try {
+    const res = await fetch('/api/scan');
+    if (!res.ok) return;
+    const d = await res.json();
+    S.wifi = d.wifi ?? [];
+    S.bt   = d.bt   ?? [];
+
+    document.getElementById('ls-w').innerHTML = renderWifi(S.wifi);
+    document.getElementById('ls-b').innerHTML = renderBt(S.bt);
+
+    const wc = S.wifi.length, bc = S.bt.length;
+    document.getElementById('hc-w').textContent = `WIFI: ${wc}`;
+    document.getElementById('hc-b').textContent = `BT: ${bc}`;
+    document.getElementById('rf-w').textContent = `● ${wc} WIFI`;
+    document.getElementById('rf-b').textContent = `◆ ${bc} BT`;
+
+    const ts = new Date().toLocaleTimeString();
+    document.getElementById('ts-w').textContent = ts;
+    document.getElementById('ts-b').textContent = ts;
+  } catch (_) {
+    // Keep existing data on network error
+  }
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  tryMap();
+  sizeRadar();
+  drawFrame();
+  fetchScan();
+  setInterval(fetchScan, 5000);
+  setInterval(tryMap, 2500);   // retry until Leaflet CDN loads
+});
+
+window.addEventListener('resize', () => {
+  sizeRadar();
+  if (mapObj) setTimeout(() => mapObj.invalidateSize(), 80);
+});
+</script>
+</body>
+</html>
