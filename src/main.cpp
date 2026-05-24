@@ -4,6 +4,7 @@
 #include <ESPAsyncWebServer.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <Adafruit_NeoPixel.h>
 #include <time.h>
 #include <freertos/semphr.h>
 
@@ -18,6 +19,9 @@ extern "C" {
 }
 
 // ─── Configuration ────────────────────────────────────────────────────────────
+#define LED_PIN         2
+#define LED_COUNT       1
+
 #define AP_SSID         "Bumptima"
 #define AP_CHANNEL      6
 #define AP_MAX_CONN     10
@@ -69,6 +73,66 @@ static bool              ntpReady = false;
 
 static DNSServer         dns;
 static AsyncWebServer    srv(WEB_PORT);
+static Adafruit_NeoPixel led(LED_COUNT, LED_PIN, NEO_GRB + NEO_KHZ800);
+
+// ─── LED helpers ──────────────────────────────────────────────────────────────
+static void ledSet(uint8_t r, uint8_t g, uint8_t b, uint8_t brightness = 40) {
+    led.setBrightness(brightness);
+    led.setPixelColor(0, led.Color(r, g, b));
+    led.show();
+}
+static void ledOff() { led.setPixelColor(0, 0); led.show(); }
+
+// Status patterns called from the LED task
+enum LedState { LED_BOOTING, LED_AP_ONLY, LED_CONNECTED, LED_CLIENT_ACTIVE };
+static volatile LedState ledState = LED_BOOTING;
+
+static void ledTask(void *) {
+    uint32_t tick = 0;
+    for (;;) {
+        switch (ledState) {
+        case LED_BOOTING:
+            // Fast white blink while booting
+            ledSet(40, 40, 40);
+            vTaskDelay(pdMS_TO_TICKS(120));
+            ledOff();
+            vTaskDelay(pdMS_TO_TICKS(120));
+            break;
+
+        case LED_AP_ONLY:
+            // Slow breathing cyan — AP up, no upstream
+            {
+                float v = (sinf(tick * 0.05f) + 1.0f) * 0.5f;
+                ledSet(0, (uint8_t)(v * 80), (uint8_t)(v * 120));
+                vTaskDelay(pdMS_TO_TICKS(30));
+                tick++;
+            }
+            break;
+
+        case LED_CONNECTED:
+            // Slow breathing green — AP + internet connected
+            {
+                float v = (sinf(tick * 0.04f) + 1.0f) * 0.5f;
+                ledSet(0, (uint8_t)(v * 150), (uint8_t)(v * 20));
+                vTaskDelay(pdMS_TO_TICKS(30));
+                tick++;
+            }
+            break;
+
+        case LED_CLIENT_ACTIVE:
+            // Double-pulse blue when a client is connected to our AP
+            ledSet(0, 30, 180);
+            vTaskDelay(pdMS_TO_TICKS(120));
+            ledOff();
+            vTaskDelay(pdMS_TO_TICKS(80));
+            ledSet(0, 30, 180);
+            vTaskDelay(pdMS_TO_TICKS(120));
+            ledOff();
+            vTaskDelay(pdMS_TO_TICKS(1200));
+            break;
+        }
+    }
+}
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 static void fmtTime(time_t t, char *buf, size_t len) {
@@ -110,6 +174,7 @@ static void appendLogFile(const ConnEntry &e) {
 
 // ─── WiFi AP client events ────────────────────────────────────────────────────
 static void onAPConnect(WiFiEvent_t, WiFiEventInfo_t info) {
+    ledState = LED_CLIENT_ACTIVE;
     char mac[18];
     auto *m = info.wifi_ap_staconnected.mac;
     snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -128,6 +193,8 @@ static void onAPConnect(WiFiEvent_t, WiFiEventInfo_t info) {
 }
 
 static void onAPDisconnect(WiFiEvent_t, WiFiEventInfo_t info) {
+    if (WiFi.softAPgetStationNum() <= 1)   // last client leaving
+        ledState = WiFi.status() == WL_CONNECTED ? LED_CONNECTED : LED_AP_ONLY;
     char mac[18];
     auto *m = info.wifi_ap_stadisconnected.mac;
     snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
@@ -364,6 +431,10 @@ void setup() {
     scanMtx = xSemaphoreCreateMutex();
     logMtx  = xSemaphoreCreateMutex();
 
+    led.begin();
+    ledOff();
+    xTaskCreate(ledTask, "led", 1024, nullptr, 1, nullptr);
+
     if (!LittleFS.begin(true)) {
         Serial.println("[FS] LittleFS mount failed");
     }
@@ -378,6 +449,7 @@ void setup() {
     delay(500);
     Serial.printf("[WiFi] AP '%s' up — IP: %s\n",
                   AP_SSID, WiFi.softAPIP().toString().c_str());
+    ledState = LED_AP_ONLY;
 
     if (strlen(STA_SSID) > 0) {
         WiFi.begin(STA_SSID, STA_PASS);
@@ -391,6 +463,7 @@ void setup() {
             // Sync time via NTP now that we have internet
             configTime(0, 0, "pool.ntp.org", "time.google.com");
             Serial.println("[NTP] time sync requested");
+            ledState = LED_CONNECTED;
 #ifdef CONFIG_LWIP_IPV4_NAPT
             ip_napt_enable((uint32_t)WiFi.softAPIP(), 1);
             Serial.println("[NAT] enabled");
