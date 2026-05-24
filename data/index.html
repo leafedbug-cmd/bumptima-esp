@@ -6,8 +6,6 @@
 <meta name="theme-color" content="#040408">
 <title>Bumptima</title>
 
-<link id="leaflet-css" rel="stylesheet"
-      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
 
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -130,18 +128,10 @@ body {
   position: relative;
 }
 
-.map-clip {
+.radar-bg {
   position: absolute; inset: 0;
   border-radius: 50%;
-  overflow: hidden;
-  background: #05100a;
-}
-#lmap { width: 100%; height: 100%; }
-.map-clip::after {
-  content: '';
-  position: absolute; inset: 0;
-  background: radial-gradient(circle, transparent 40%, rgba(0,0,0,0.5) 100%);
-  pointer-events: none;
+  background: radial-gradient(circle, #061209 0%, #030806 100%);
 }
 
 #rc {
@@ -423,7 +413,7 @@ body {
 <section class="radar-sec">
   <div class="radar-wrap" id="rw">
     <div class="radar-disc" id="rd">
-      <div class="map-clip"><div id="lmap"></div></div>
+      <div class="radar-bg"></div>
       <canvas id="rc"></canvas>
     </div>
     <div class="compass">
@@ -480,12 +470,10 @@ body {
 
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 'use strict';
 
 const S = { wifi: [], bt: [] };
-let mapObj = null, mapReady = false, locMarker = null, firstFix = true;
 let cSize = 0, sweepA = 0;
 const SWEEP_SPEED = 0.017;
 
@@ -547,83 +535,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-// ── Leaflet map ───────────────────────────────────────────────────────────────
-function tryMap() {
-  if (typeof L === 'undefined' || mapReady) return;
-  try {
-    mapObj = L.map('lmap', {
-      zoomControl: false, attributionControl: false,
-      dragging: false, keyboard: false,
-      scrollWheelZoom: false, touchZoom: false, doubleClickZoom: false,
-    }).setView([0, 0], 2);
-
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      subdomains: 'abcd', maxZoom: 19,
-    }).addTo(mapObj);
-
-    mapReady = true;
-    startLocation();
-  } catch (_) {}
-}
-
-function makeDotIcon(color) {
-  return L.divIcon({
-    className: '',
-    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 10px ${color},0 0 24px ${color}88;"></div>`,
-    iconSize: [14, 14], iconAnchor: [7, 7],
-  });
-}
-
 function applyLocation(lat, lng, src, label) {
-  if (!mapObj) { setTimeout(() => applyLocation(lat, lng, src, label), 500); return; }
-  const ll    = [lat, lng];
   const badge = document.getElementById('loc-src');
-
-  if (firstFix) { mapObj.setView(ll, 17); firstFix = false; }
-  else           { mapObj.panTo(ll, { animate: true, duration: 0.8 }); }
-
-  const color = src === 'gps' ? '#4fc3f7' : src === 'ip' ? '#ffc107' : '#00ff64';
-  if (locMarker) locMarker.setLatLng(ll);
-  else locMarker = L.marker(ll, { icon: makeDotIcon(color), zIndexOffset: 1000 }).addTo(mapObj);
-
   const labels = { gps: '▲ GPS', ip: '◎ IP', saved: '📍 ' + (label || 'SAVED'), manual: '📍 ' + (label || 'SET') };
   badge.textContent   = labels[src] || src.toUpperCase();
   badge.className     = `loc-src ${src === 'manual' ? 'saved' : src}`;
   badge.style.display = '';
-}
-
-// Priority: saved → GPS → IP geo
-function startLocation() {
-  // Load saved location instantly
-  const saved = loadSavedLoc();
-  if (saved) applyLocation(saved.lat, saved.lng, 'saved', saved.label);
-
-  // Try GPS — overrides saved if it actually works
-  if ('geolocation' in navigator) {
-    navigator.geolocation.watchPosition(
-      pos => {
-        applyLocation(pos.coords.latitude, pos.coords.longitude, 'gps');
-        saveLoc(pos.coords.latitude, pos.coords.longitude, 'GPS');
-      },
-      _ => { if (!saved) fetchIPLocation(); },
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 8000 }
-    );
-  } else if (!saved) {
-    fetchIPLocation();
-  }
-}
-
-async function fetchIPLocation() {
-  const services = [
-    async () => { const d = await (await fetch('https://ipapi.co/json/')).json(); return { lat: d.latitude, lng: d.longitude }; },
-    async () => { const d = await (await fetch('https://ip-api.com/json')).json(); return { lat: d.lat, lng: d.lon }; },
-  ];
-  for (const svc of services) {
-    try {
-      const { lat, lng } = await svc();
-      if (lat && lng) { applyLocation(lat, lng, 'ip'); setTimeout(fetchIPLocation, 60000); return; }
-    } catch (_) {}
-  }
 }
 
 // ── Radar canvas ─────────────────────────────────────────────────────────────
@@ -836,18 +753,18 @@ setVh();
 
 window.addEventListener('load', () => {
   setVh();
-  tryMap();
+  // Show saved location badge if present
+  const saved = loadSavedLoc();
+  if (saved) applyLocation(saved.lat, saved.lng, 'saved', saved.label);
   sizeRadar();
   drawFrame();
   fetchScan();
   setInterval(fetchScan, 5000);
-  setInterval(tryMap, 2500);
 });
 
 window.addEventListener('resize', () => {
   setVh();
   sizeRadar();
-  if (mapObj) setTimeout(() => mapObj.invalidateSize(), 80);
 });
 
 // Passive touch listeners (improves scroll performance on Safari/iOS)
