@@ -30,8 +30,8 @@ extern "C" {
 // ── Upstream WiFi for internet passthrough.
 // Set STA_SSID to your phone's hotspot SSID, STA_PASS to its password.
 // Leave STA_SSID empty to run AP-only (no internet sharing).
-static const char STA_SSID[] = "";
-static const char STA_PASS[] = "";
+static const char STA_SSID[] = "Dis1Mom";
+static const char STA_PASS[] = "wasgoodlol";
 
 // ─── Device types ─────────────────────────────────────────────────────────────
 struct WiFiDev {
