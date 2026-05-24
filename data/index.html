@@ -187,8 +187,76 @@ body {
   border-radius: 2px;
   border: 1px solid;
 }
-.loc-src.gps { color: var(--g50); border-color: rgba(0,255,100,0.25); }
-.loc-src.ip  { color: rgba(255,200,0,0.6); border-color: rgba(255,200,0,0.25); }
+.loc-src.gps    { color: var(--g50); border-color: rgba(0,255,100,0.25); }
+.loc-src.ip     { color: rgba(255,200,0,0.6); border-color: rgba(255,200,0,0.25); }
+.loc-src.saved  { color: rgba(79,195,247,0.7); border-color: rgba(79,195,247,0.3); }
+.loc-src.manual { color: rgba(79,195,247,0.7); border-color: rgba(79,195,247,0.3); }
+
+/* Location set button */
+.loc-btn {
+  background: none; border: 1px solid rgba(0,255,100,0.2);
+  color: rgba(0,255,100,0.5); font-family: inherit; font-size: 0.52rem;
+  letter-spacing: 1px; padding: 1px 6px; border-radius: 2px; cursor: pointer;
+  pointer-events: auto;
+  transition: all 0.15s;
+}
+.loc-btn:hover, .loc-btn:active { color: var(--g); border-color: var(--g50); background: rgba(0,255,100,0.07); }
+
+/* Location modal */
+.loc-modal {
+  display: none; position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,0.9);
+  align-items: center; justify-content: center;
+}
+.loc-modal.show { display: flex; }
+.loc-box {
+  background: #070b0f;
+  border: 1px solid rgba(0,255,100,0.3);
+  border-radius: 6px; padding: 22px 20px;
+  width: min(340px, 92vw);
+  display: flex; flex-direction: column; gap: 12px;
+}
+.loc-box-title {
+  font-size: 0.7rem; letter-spacing: 3px;
+  color: var(--g); text-shadow: 0 0 10px var(--g);
+}
+.loc-saved-label {
+  font-size: 0.58rem; color: rgba(79,195,247,0.6);
+  letter-spacing: 1px; min-height: 1em;
+}
+.loc-input {
+  background: rgba(0,255,100,0.04);
+  border: 1px solid rgba(0,255,100,0.25);
+  color: #c8ffd4;
+  font-family: 'Courier New', monospace; font-size: 0.72rem;
+  padding: 8px 10px; border-radius: 3px; outline: none;
+  width: 100%;
+  transition: border-color 0.15s;
+}
+.loc-input:focus { border-color: var(--g50); }
+.loc-input::placeholder { color: rgba(0,255,100,0.25); }
+.loc-status {
+  font-size: 0.58rem; letter-spacing: 1px; min-height: 1em;
+  color: rgba(0,255,100,0.45);
+}
+.loc-status.err { color: rgba(255,80,80,0.7); }
+.loc-btns { display: flex; gap: 10px; }
+.loc-set-btn {
+  flex: 1; background: rgba(0,255,100,0.08);
+  border: 1px solid var(--g50); color: var(--g);
+  font-family: inherit; font-size: 0.65rem; letter-spacing: 2px;
+  padding: 7px; border-radius: 3px; cursor: pointer;
+  transition: all 0.15s;
+}
+.loc-set-btn:hover { background: rgba(0,255,100,0.15); }
+.loc-set-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.loc-cancel-btn {
+  background: none; border: 1px solid rgba(0,255,100,0.15);
+  color: rgba(0,255,100,0.4); font-family: inherit; font-size: 0.65rem;
+  padding: 7px 14px; border-radius: 3px; cursor: pointer;
+  transition: all 0.15s;
+}
+.loc-cancel-btn:hover { color: var(--g50); border-color: rgba(0,255,100,0.3); }
 
 /* ── Device list section — two columns, no tabs ── */
 .list-sec {
@@ -366,9 +434,26 @@ body {
   <div class="radar-footer">
     <span class="rf-w" id="rf-w">● 0 WIFI</span>
     <span class="loc-src" id="loc-src" style="display:none"></span>
+    <button class="loc-btn" onclick="openLocModal()">📍 SET</button>
     <span class="rf-b" id="rf-b">◆ 0 BT</span>
   </div>
 </section>
+
+<!-- ── Location modal ── -->
+<div class="loc-modal" id="loc-modal">
+  <div class="loc-box">
+    <div class="loc-box-title">SET LOCATION</div>
+    <div class="loc-saved-label" id="loc-saved-label"></div>
+    <input class="loc-input" id="loc-input"
+           type="text" placeholder="e.g. Chenal Promenade Little Rock"
+           autocomplete="off" autocorrect="off" spellcheck="false"/>
+    <div class="loc-status" id="loc-status"></div>
+    <div class="loc-btns">
+      <button class="loc-set-btn" id="loc-set-btn" onclick="geocodeAndSet()">FIND &amp; SET</button>
+      <button class="loc-cancel-btn" onclick="closeLocModal()">CANCEL</button>
+    </div>
+  </div>
+</div>
 
 <!-- ── Side-by-side device lists ── -->
 <div class="list-sec">
@@ -404,7 +489,65 @@ let mapObj = null, mapReady = false, locMarker = null, firstFix = true;
 let cSize = 0, sweepA = 0;
 const SWEEP_SPEED = 0.017;
 
-// ── Leaflet map ──────────────────────────────────────────────────────────────
+// ── Location storage ──────────────────────────────────────────────────────────
+const LOC_KEY = 'bumptima_loc';
+
+function loadSavedLoc() {
+  try { const d = JSON.parse(localStorage.getItem(LOC_KEY)); if (d?.lat) return d; } catch(_){}
+  return null;
+}
+function saveLoc(lat, lng, label) {
+  try { localStorage.setItem(LOC_KEY, JSON.stringify({ lat, lng, label })); } catch(_){}
+}
+
+// ── Location modal ────────────────────────────────────────────────────────────
+function openLocModal() {
+  const saved = loadSavedLoc();
+  const lbl   = document.getElementById('loc-saved-label');
+  lbl.textContent = saved ? `CURRENT: ${saved.label || saved.lat.toFixed(4) + ', ' + saved.lng.toFixed(4)}` : '';
+  document.getElementById('loc-input').value   = '';
+  document.getElementById('loc-status').textContent = '';
+  document.getElementById('loc-status').className   = 'loc-status';
+  document.getElementById('loc-modal').classList.add('show');
+  setTimeout(() => document.getElementById('loc-input').focus(), 100);
+}
+function closeLocModal() {
+  document.getElementById('loc-modal').classList.remove('show');
+}
+
+async function geocodeAndSet() {
+  const q   = document.getElementById('loc-input').value.trim();
+  if (!q) return;
+  const btn = document.getElementById('loc-set-btn');
+  const st  = document.getElementById('loc-status');
+  btn.disabled = true;
+  st.className = 'loc-status';
+  st.textContent = 'SEARCHING...';
+
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1`;
+    const res = await fetch(url, { headers: { 'Accept-Language': 'en' } });
+    const data = await res.json();
+    if (!data.length) { st.textContent = 'NOT FOUND — TRY A DIFFERENT QUERY'; st.className = 'loc-status err'; btn.disabled = false; return; }
+    const { lat, lon, display_name } = data[0];
+    const label = display_name.split(',').slice(0, 2).join(',').trim();
+    saveLoc(+lat, +lon, label);
+    applyLocation(+lat, +lon, 'manual', label);
+    closeLocModal();
+  } catch(e) {
+    st.textContent = 'ERROR — CHECK INTERNET CONNECTION'; st.className = 'loc-status err';
+  }
+  btn.disabled = false;
+}
+
+// Enter key submits
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('loc-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') geocodeAndSet();
+  });
+});
+
+// ── Leaflet map ───────────────────────────────────────────────────────────────
 function tryMap() {
   if (typeof L === 'undefined' || mapReady) return;
   try {
@@ -426,70 +569,59 @@ function tryMap() {
 function makeDotIcon(color) {
   return L.divIcon({
     className: '',
-    html: `<div style="
-      width:14px;height:14px;border-radius:50%;
-      background:${color};border:2px solid #fff;
-      box-shadow:0 0 10px ${color},0 0 24px ${color}88;
-    "></div>`,
+    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 10px ${color},0 0 24px ${color}88;"></div>`,
     iconSize: [14, 14], iconAnchor: [7, 7],
   });
 }
 
-function applyLocation(lat, lng, src) {
-  if (!mapObj) return;
-  const ll = [lat, lng];
+function applyLocation(lat, lng, src, label) {
+  if (!mapObj) { setTimeout(() => applyLocation(lat, lng, src, label), 500); return; }
+  const ll    = [lat, lng];
   const badge = document.getElementById('loc-src');
 
-  if (firstFix) {
-    mapObj.setView(ll, 17);
-    firstFix = false;
-  } else {
-    mapObj.panTo(ll, { animate: true, duration: 0.8 });
-  }
+  if (firstFix) { mapObj.setView(ll, 17); firstFix = false; }
+  else           { mapObj.panTo(ll, { animate: true, duration: 0.8 }); }
 
-  const color = src === 'gps' ? '#4fc3f7' : '#ffc107';
-  if (locMarker) {
-    locMarker.setLatLng(ll);
-  } else {
-    locMarker = L.marker(ll, { icon: makeDotIcon(color), zIndexOffset: 1000 }).addTo(mapObj);
-  }
+  const color = src === 'gps' ? '#4fc3f7' : src === 'ip' ? '#ffc107' : '#00ff64';
+  if (locMarker) locMarker.setLatLng(ll);
+  else locMarker = L.marker(ll, { icon: makeDotIcon(color), zIndexOffset: 1000 }).addTo(mapObj);
 
-  // Show source badge
-  badge.textContent = src === 'gps' ? '▲ GPS' : '◎ IP LOC';
-  badge.className   = `loc-src ${src}`;
+  const labels = { gps: '▲ GPS', ip: '◎ IP', saved: '📍 ' + (label || 'SAVED'), manual: '📍 ' + (label || 'SET') };
+  badge.textContent   = labels[src] || src.toUpperCase();
+  badge.className     = `loc-src ${src === 'manual' ? 'saved' : src}`;
   badge.style.display = '';
 }
 
-// Try GPS first; if denied/unavailable fall back to IP geolocation
+// Priority: saved → GPS → IP geo
 function startLocation() {
+  // Load saved location instantly
+  const saved = loadSavedLoc();
+  if (saved) applyLocation(saved.lat, saved.lng, 'saved', saved.label);
+
+  // Try GPS — overrides saved if it actually works
   if ('geolocation' in navigator) {
     navigator.geolocation.watchPosition(
-      pos => applyLocation(pos.coords.latitude, pos.coords.longitude, 'gps'),
-      _err => fetchIPLocation(),   // permission denied or unavailable → IP fallback
+      pos => {
+        applyLocation(pos.coords.latitude, pos.coords.longitude, 'gps');
+        saveLoc(pos.coords.latitude, pos.coords.longitude, 'GPS');
+      },
+      _ => { if (!saved) fetchIPLocation(); },
       { enableHighAccuracy: true, maximumAge: 3000, timeout: 8000 }
     );
-  } else {
+  } else if (!saved) {
     fetchIPLocation();
   }
 }
 
 async function fetchIPLocation() {
-  // Try two free IP-geo services in order; no API key needed
   const services = [
-    async () => { const d = await (await fetch('https://ipapi.co/json/')).json();
-                  return { lat: d.latitude, lng: d.longitude }; },
-    async () => { const d = await (await fetch('https://ip-api.com/json')).json();
-                  return { lat: d.lat, lng: d.lon }; },
+    async () => { const d = await (await fetch('https://ipapi.co/json/')).json(); return { lat: d.latitude, lng: d.longitude }; },
+    async () => { const d = await (await fetch('https://ip-api.com/json')).json(); return { lat: d.lat, lng: d.lon }; },
   ];
   for (const svc of services) {
     try {
       const { lat, lng } = await svc();
-      if (lat && lng) {
-        applyLocation(lat, lng, 'ip');
-        // Re-poll every 60 s (IP location is city-level, doesn't need faster)
-        setTimeout(fetchIPLocation, 60000);
-        return;
-      }
+      if (lat && lng) { applyLocation(lat, lng, 'ip'); setTimeout(fetchIPLocation, 60000); return; }
     } catch (_) {}
   }
 }
