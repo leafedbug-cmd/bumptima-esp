@@ -37,7 +37,9 @@ html, body {
 body {
   display: flex;
   flex-direction: column;
+  height: 100vh;
   height: 100dvh;
+  height: calc(var(--vh, 1vh) * 100);
 }
 
 /* ── Header ── */
@@ -238,6 +240,7 @@ body {
 .col {
   flex: 1;
   overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   min-width: 0;
 }
 .col:first-child { border-right: 1px solid rgba(0,255,100,0.08); }
@@ -340,6 +343,11 @@ body {
     <span class="count-w" id="hc-w">WIFI: —</span>
     <span class="count-b" id="hc-b">BT: —</span>
   </div>
+  <a href="/log.html" style="
+    font-family:inherit;font-size:0.55rem;letter-spacing:1px;
+    color:rgba(0,255,100,0.45);text-decoration:none;
+    border:1px solid rgba(0,255,100,0.2);padding:2px 7px;border-radius:3px;
+  ">LOG</a>
   <div class="pulse"></div>
 </header>
 
@@ -488,7 +496,7 @@ async function fetchIPLocation() {
 
 // ── Radar canvas ─────────────────────────────────────────────────────────────
 const canvas = document.getElementById('rc');
-const ctx    = canvas.getContext('2d');
+const ctx    = canvas.getContext('2d', { alpha: true });
 
 function sizeRadar() {
   const sec  = document.querySelector('.radar-sec');
@@ -565,14 +573,52 @@ function drawFrame() {
   ].forEach(({ id, rssi, t }) => {
     const r = rssiToR(rssi, R), a = idToAngle(id);
     const x = cx + Math.cos(a) * r, y = cy + Math.sin(a) * r;
-    const color = t === 'w' ? '#00ff64' : '#4fc3f7';
-    const glow  = t === 'w' ? 'rgba(0,255,100,0.14)' : 'rgba(79,195,247,0.14)';
-    ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2);
-    ctx.fillStyle = glow; ctx.fill();
-    ctx.beginPath(); ctx.arc(x, y, 2.8, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.shadowColor = color; ctx.shadowBlur = 7;
-    ctx.fill(); ctx.shadowBlur = 0;
+    const color     = t === 'w' ? '#00ff64' : '#4fc3f7';
+    const glowRgb   = t === 'w' ? '0,255,100' : '79,195,247';
+
+    // Angle delta between sweep line and this dot (wrapped to [0, 2π))
+    let da = ((sweepA - a) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+    // da ≈ 0 means the sweep just passed over; da close to 2π also means just about to
+    // We want "just swept over" = small positive da (sweep passed within last ~25°)
+    const PING_ARC  = Math.PI * (25 / 180); // 25° window after sweep passes
+    const pingFrac  = da < PING_ARC ? (1 - da / PING_ARC) : 0; // 1→0 as sweep recedes
+
+    // Outer glow halo (always visible, pulses on ping)
+    const haloR = 10 + pingFrac * 6;
+    const haloA = 0.18 + pingFrac * 0.45;
+    ctx.beginPath(); ctx.arc(x, y, haloR, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(${glowRgb},${haloA})`; ctx.fill();
+
+    // Expanding ping ring
+    if (pingFrac > 0) {
+      const ringR = 10 + (1 - pingFrac) * 22;
+      const ringA = pingFrac * 0.85;
+      ctx.beginPath(); ctx.arc(x, y, ringR, 0, Math.PI * 2);
+      ctx.strokeStyle = `rgba(${glowRgb},${ringA})`;
+      ctx.lineWidth = 1.5 + pingFrac * 1.5; ctx.stroke();
+      ctx.lineWidth = 1;
+    }
+
+    // Core dot — bright white-flash on ping, otherwise solid color
+    const coreR = 4 + pingFrac * 3;
+    const flashR = Math.floor(pingFrac * 255); // 0→255
+    const flashG = Math.floor(255 * (t === 'w' ? 1 : 0.76 + pingFrac * 0.24));
+    const flashB = Math.floor(pingFrac * 255 * (t === 'b' ? 1 : 0.4));
+    const dotColor = pingFrac > 0.05
+      ? `rgb(${255},${flashG},${flashB})`
+      : color;
+    ctx.beginPath(); ctx.arc(x, y, coreR, 0, Math.PI * 2);
+    ctx.fillStyle = dotColor;
+    ctx.shadowColor = pingFrac > 0.05 ? '#ffffff' : color;
+    ctx.shadowBlur  = 10 + pingFrac * 18;
+    ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Persistent dim trail dot (so dot is always visible even after sweep passes)
+    // Already covered by the always-visible halo above; add a subtle inner ring
+    ctx.beginPath(); ctx.arc(x, y, coreR + 2.5, 0, Math.PI * 2);
+    ctx.strokeStyle = `rgba(${glowRgb},0.28)`; ctx.lineWidth = 1; ctx.stroke();
+    ctx.lineWidth = 1;
   });
 
   ctx.restore();
@@ -648,8 +694,14 @@ async function fetchScan() {
   } catch (_) {}
 }
 
-// ── Boot ──────────────────────────────────────────────────────────────────────
+// ── Boot / Safari fixes ───────────────────────────────────────────────────────
+function setVh() {
+  document.documentElement.style.setProperty('--vh', window.innerHeight * 0.01 + 'px');
+}
+setVh();
+
 window.addEventListener('load', () => {
+  setVh();
   tryMap();
   sizeRadar();
   drawFrame();
@@ -659,9 +711,13 @@ window.addEventListener('load', () => {
 });
 
 window.addEventListener('resize', () => {
+  setVh();
   sizeRadar();
   if (mapObj) setTimeout(() => mapObj.invalidateSize(), 80);
 });
+
+// Passive touch listeners (improves scroll performance on Safari/iOS)
+document.addEventListener('touchstart', function() {}, { passive: true });
 </script>
 </body>
 </html>

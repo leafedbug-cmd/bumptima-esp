@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="theme-color" content="#040408">
+<title>Bumptima — Log</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --g:   #00ff64;
+  --g50: rgba(0,255,100,0.5);
+  --g15: rgba(0,255,100,0.15);
+  --g05: rgba(0,255,100,0.05);
+  --bg:  #040408;
+  --line: rgba(0,255,100,0.14);
+}
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--g);
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 13px;
+}
+body { display: flex; flex-direction: column; height: 100dvh; }
+
+/* ── Header ── */
+.hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  height: 38px; padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  background: rgba(4,4,12,0.97);
+}
+.hdr-left { display: flex; align-items: center; gap: 12px; }
+.back {
+  background: none; border: 1px solid var(--g15); color: var(--g50);
+  font-family: inherit; font-size: 0.65rem; padding: 3px 8px;
+  border-radius: 3px; cursor: pointer; letter-spacing: 1px;
+  text-decoration: none;
+  transition: all 0.15s;
+}
+.back:hover { color: var(--g); border-color: var(--g50); }
+.hdr-title {
+  font-size: 0.82rem; letter-spacing: 6px; font-weight: bold;
+  text-shadow: 0 0 14px var(--g);
+}
+.hdr-sub { font-size: 0.58rem; color: var(--g50); letter-spacing: 1px; }
+
+/* ── Toolbar ── */
+.toolbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.btn {
+  background: none; font-family: inherit; font-size: 0.62rem;
+  letter-spacing: 1px; padding: 5px 12px;
+  border-radius: 3px; cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-dl {
+  color: var(--g); border: 1px solid var(--g50);
+  text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+}
+.btn-dl:hover { background: var(--g15); }
+.btn-clear {
+  color: rgba(255,80,80,0.6); border: 1px solid rgba(255,80,80,0.25);
+}
+.btn-clear:hover { background: rgba(255,80,80,0.08); color: rgba(255,80,80,0.9); }
+.count-label { font-size: 0.58rem; color: var(--g50); letter-spacing: 1px; }
+
+/* ── Table ── */
+.tbl-wrap { flex: 1; overflow-y: auto; }
+.tbl-wrap::-webkit-scrollbar { width: 3px; }
+.tbl-wrap::-webkit-scrollbar-thumb { background: rgba(0,255,100,0.2); border-radius: 2px; }
+
+table {
+  width: 100%; border-collapse: collapse;
+  font-size: 0.65rem;
+}
+thead th {
+  position: sticky; top: 0;
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 0.55rem;
+  letter-spacing: 1px;
+  color: var(--g50);
+  background: rgba(4,4,12,0.98);
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+tbody tr { border-bottom: 1px solid rgba(0,255,100,0.04); }
+tbody tr:hover { background: var(--g05); }
+tbody td {
+  padding: 6px 10px;
+  color: #c8ffd4;
+  white-space: nowrap;
+}
+.td-mac { font-size: 0.68rem; color: var(--g); letter-spacing: 1px; }
+.td-time { color: rgba(0,255,100,0.6); font-size: 0.6rem; }
+.td-dur  { color: rgba(0,255,100,0.5); font-size: 0.6rem; }
+
+.badge {
+  display: inline-block; padding: 1px 5px; border-radius: 2px;
+  font-size: 0.52rem; letter-spacing: 1px;
+}
+.badge-active {
+  color: #4fc3f7; background: rgba(79,195,247,0.1);
+  border: 1px solid rgba(79,195,247,0.25);
+}
+.badge-done {
+  color: rgba(0,255,100,0.35); background: var(--g05);
+  border: 1px solid rgba(0,255,100,0.1);
+}
+
+.empty-row td {
+  text-align: center; padding: 32px;
+  color: rgba(0,255,100,0.2); letter-spacing: 2px; font-size: 0.65rem;
+}
+
+/* ── Confirm overlay ── */
+.overlay {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,0.85);
+  z-index: 99;
+  align-items: center; justify-content: center;
+}
+.overlay.show { display: flex; }
+.confirm-box {
+  background: #0a0f14; border: 1px solid rgba(255,80,80,0.4);
+  border-radius: 6px; padding: 24px 28px; max-width: 300px; text-align: center;
+}
+.confirm-box p {
+  font-size: 0.72rem; color: rgba(255,80,80,0.8);
+  letter-spacing: 1px; margin-bottom: 20px; line-height: 1.6;
+}
+.confirm-btns { display: flex; gap: 12px; justify-content: center; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<header class="hdr">
+  <div class="hdr-left">
+    <a class="back" href="/">← BACK</a>
+    <div>
+      <div class="hdr-title">CONNECTION LOG</div>
+    </div>
+  </div>
+  <div class="hdr-sub" id="last-update">—</div>
+</header>
+
+<!-- ── Toolbar ── -->
+<div class="toolbar">
+  <span class="count-label" id="entry-count">LOADING...</span>
+  <div style="display:flex;gap:8px;align-items:center;">
+    <a class="btn btn-dl" href="/log/download" download="bumptima_log.csv">
+      ⬇ DOWNLOAD CSV
+    </a>
+    <button class="btn btn-clear" onclick="confirmClear()">✕ CLEAR</button>
+  </div>
+</div>
+
+<!-- ── Table ── -->
+<div class="tbl-wrap">
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>MAC ADDRESS</th>
+        <th>CONNECTED</th>
+        <th>DISCONNECTED</th>
+        <th>DURATION</th>
+        <th>STATUS</th>
+      </tr>
+    </thead>
+    <tbody id="log-body">
+      <tr class="empty-row"><td colspan="6">LOADING...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ── Clear confirm ── -->
+<div class="overlay" id="overlay">
+  <div class="confirm-box">
+    <p>CLEAR ALL LOG ENTRIES?<br>THIS CANNOT BE UNDONE.</p>
+    <div class="confirm-btns">
+      <button class="btn btn-clear" onclick="doClear()">CLEAR</button>
+      <button class="btn btn-dl" onclick="closeOverlay()">CANCEL</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function fmtDur(s) {
+  if (s < 0) return '—';
+  if (s < 60)   return s + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm ' + (s%60) + 's';
+  return Math.floor(s/3600) + 'h ' + Math.floor((s%3600)/60) + 'm';
+}
+
+async function loadLog() {
+  try {
+    const res = await fetch('/api/log');
+    if (!res.ok) return;
+    const data = await res.json();
+    const tbody = document.getElementById('log-body');
+
+    document.getElementById('entry-count').textContent =
+      `${data.length} ENTR${data.length === 1 ? 'Y' : 'IES'}`;
+    document.getElementById('last-update').textContent =
+      new Date().toLocaleTimeString();
+
+    if (!data.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="6">NO CONNECTIONS LOGGED YET</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.map((e, i) => `
+      <tr>
+        <td class="td-time">${data.length - i}</td>
+        <td class="td-mac">${e.mac}</td>
+        <td class="td-time">${e.conn || '—'}</td>
+        <td class="td-time">${e.disc || '—'}</td>
+        <td class="td-dur">${fmtDur(e.dur)}</td>
+        <td>${e.disc
+          ? '<span class="badge badge-done">GONE</span>'
+          : '<span class="badge badge-active">ACTIVE</span>'}</td>
+      </tr>`).join('');
+  } catch (_) {}
+}
+
+function confirmClear() { document.getElementById('overlay').classList.add('show'); }
+function closeOverlay()  { document.getElementById('overlay').classList.remove('show'); }
+
+async function doClear() {
+  closeOverlay();
+  await fetch('/log/clear', { method: 'POST' });
+  loadLog();
+}
+
+loadLog();
+setInterval(loadLog, 10000);
+</script>
+</body>
+</html>
