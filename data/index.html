@@ -680,14 +680,16 @@ function drawFrame() {
     ctx.stroke();
   });
 
-  const TRAIL = 52;
-  for (let i = 0; i < TRAIL; i++) {
-    const frac = i / TRAIL;
-    const a0   = sweepA - frac * (Math.PI * 0.55);
-    const a1   = a0 - (Math.PI * 0.55 / TRAIL);
+  // Sweep trail — use a single gradient-filled sector to avoid opacity accumulation
+  const TRAIL_ARC = Math.PI * 0.45;   // 81° trail
+  const TRAIL_STEPS = 18;
+  for (let i = 0; i < TRAIL_STEPS; i++) {
+    const frac = i / TRAIL_STEPS;
+    const a0   = sweepA - frac * TRAIL_ARC;
+    const a1   = a0 - TRAIL_ARC / TRAIL_STEPS;
     ctx.beginPath(); ctx.moveTo(cx, cy);
     ctx.arc(cx, cy, R, a0, a1, true); ctx.closePath();
-    ctx.fillStyle = `rgba(0,255,100,${0.14 * Math.pow(1 - frac, 1.6)})`;
+    ctx.fillStyle = `rgba(0,255,100,${0.028 * Math.pow(1 - frac, 1.8)})`;
     ctx.fill();
   }
 
@@ -715,9 +717,9 @@ function drawFrame() {
     const PING_ARC  = Math.PI * (25 / 180); // 25° window after sweep passes
     const pingFrac  = da < PING_ARC ? (1 - da / PING_ARC) : 0; // 1→0 as sweep recedes
 
-    // Outer glow halo (always visible, pulses on ping)
-    const haloR = 10 + pingFrac * 6;
-    const haloA = 0.18 + pingFrac * 0.45;
+    // Outer glow halo (subtle always-on, bright on ping)
+    const haloR = 8 + pingFrac * 6;
+    const haloA = 0.10 + pingFrac * 0.40;
     ctx.beginPath(); ctx.arc(x, y, haloR, 0, Math.PI * 2);
     ctx.fillStyle = `rgba(${glowRgb},${haloA})`; ctx.fill();
 
