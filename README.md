@@ -2,6 +2,8 @@
 
 ESP32-WROOM-32UE firmware — Lonely Binary Gold Edition board.
 
+Repository recovery details: [docs/REPOSITORY-IDENTITY.md](docs/REPOSITORY-IDENTITY.md).
+
 WiFi access point named **Bumptima** (open/no password) with a captive-portal web UI showing a live radar map of nearby WiFi networks and Bluetooth Classic devices.
 
 See [SPECSHEET.md](SPECSHEET.md) for the full pinout reference.
