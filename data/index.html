@@ -555,7 +555,6 @@ function sizeRadar() {
   canvas.height = side;
   document.getElementById('rd').style.width  = side + 'px';
   document.getElementById('rd').style.height = side + 'px';
-  if (mapObj) setTimeout(() => mapObj.invalidateSize(), 60);
 }
 
 function idToAngle(s) {

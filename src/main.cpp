@@ -13,10 +13,12 @@
 #include "esp_bt_main.h"
 #include "esp_gap_bt_api.h"
 
-// NAT/IP forwarding between STA and AP interfaces
+// NAT/IP forwarding — only available when lwip is compiled with NAPT support
+#ifdef CONFIG_LWIP_IPV4_NAPT
 extern "C" {
 #include "lwip/lwip_napt.h"
 }
+#endif
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 #define LED_PIN         2
